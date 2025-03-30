@@ -23,7 +23,7 @@ CREDENTIALS_JSON = os.getenv("CREDENTIALS_FILE")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Подключение к Google Sheets через содержимое переменной CREDENTIALS_JSON
+# Подключение к Google Sheets
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 try:
@@ -57,7 +57,6 @@ async def find_order(message: types.Message):
     order_id = message.text.strip()
     try:
         data = sheet.get_all_values()
-        headers = data[0]
         rows = data[1:]
         found_orders = [row for row in rows if row[1] == order_id]
 
@@ -94,5 +93,5 @@ async def main():
     return app
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))  # Railway передает порт через переменную окружения PORT
+    port = int(os.getenv("PORT", 5000))
     web.run_app(main(), port=port)
