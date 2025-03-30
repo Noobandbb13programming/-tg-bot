@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import json
 from aiohttp import web
 import gspread
 from dotenv import load_dotenv
@@ -12,22 +13,26 @@ from oauth2client.service_account import ServiceAccountCredentials
 # Загружаем переменные окружения
 load_dotenv()
 
+# Получаем переменные
 TOKEN = os.getenv("BOT_TOKEN")
 SPREADSHEET_ID = os.getenv("GOOGLE_SHEET_ID")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Railway подставит ссылку вебхука
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+CREDENTIALS_JSON = os.getenv("CREDENTIALS_FILE")
 
-# Логирование
+# Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Подключение к Google Sheets
+# Подключение к Google Sheets через содержимое переменной CREDENTIALS_JSON
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-CREDENTIALS_FILE = "credentials.json"
 
 try:
-    creds = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, SCOPES)
+    if not CREDENTIALS_JSON:
+        raise Exception("Переменная окружения CREDENTIALS_JSON не установлена")
+    credentials_dict = json.loads(CREDENTIALS_JSON)
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, SCOPES)
     client = gspread.authorize(creds)
-    sheet = client.open_by_key(SPREADSHEET_ID).sheet1
+    sheet = client.open_by_key(SPREADSHEET_ID).sheet1  # Открываем первый лист
     logger.info("✅ Подключение к Google Sheets успешно")
 except Exception as e:
     logger.error(f"❌ Ошибка подключения к Google Sheets: {e}")
@@ -37,16 +42,16 @@ except Exception as e:
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-
+# Обработчик команды /start
 @dp.message(Command("start"))
 async def start_command(message: types.Message):
     await message.answer("Привет! Отправь мне ID заказа, и я найду его в базе.")
 
-
+# Обработчик поиска заказа
 @dp.message()
 async def find_order(message: types.Message):
     if not sheet:
-        await message.answer("⚠️ Ошибка поделючения.")
+        await message.answer("⚠️ Ошибка подключения к Google Sheets.")
         return
 
     order_id = message.text.strip()
@@ -54,7 +59,6 @@ async def find_order(message: types.Message):
         data = sheet.get_all_values()
         headers = data[0]
         rows = data[1:]
-
         found_orders = [row for row in rows if row[1] == order_id]
 
         if found_orders:
@@ -65,33 +69,30 @@ async def find_order(message: types.Message):
             )
         else:
             response = "❌ Заказ не найден. Проверьте ID."
-
     except Exception as e:
         response = f"⚠️ Ошибка: {e}"
         logger.error(f"Ошибка при поиске заказа: {e}")
 
     await message.answer(response)
 
-
-# Запуск веб-сервера для вебхука
+# Обработчик для вебхука
 async def webhook(request):
     update = await request.json()
     await dp.feed_update(bot, update)
     return web.Response(text="OK")
 
-
+# Установка вебхука при запуске
 async def on_startup():
     await bot.set_webhook(WEBHOOK_URL)
     logger.info("🚀 Вебхук установлен!")
 
-
+# Основная функция для запуска веб-сервера
 async def main():
     app = web.Application()
     app.router.add_post("/", webhook)
     await on_startup()
     return app
 
-
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))  # Railway передает порт
+    port = int(os.getenv("PORT", 5000))  # Railway передает порт через переменную окружения PORT
     web.run_app(main(), port=port)
